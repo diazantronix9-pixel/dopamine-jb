@@ -1,0 +1,71 @@
+name: Build Dopamine IPA
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      scheme:
+        description: Xcode scheme
+        required: false
+        default: Dopamine
+
+jobs:
+  build:
+    runs-on: macos-15
+    env:
+      ACC_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      ACC_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+      ACC_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Build for device (Release)
+        run: |
+          xcodebuild \
+            -project Dopamine.xcodeproj \
+            -scheme "${{ github.event.inputs.scheme || 'Dopamine' }}" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates YES \
+            -archivePath build/Dopamine.xcarchive \
+            archive \
+            SKIP_INSTALL=NO
+
+      - name: Export IPA (development)
+        run: |
+          cat > ExportOptions.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>development</string>
+            <key>destination</key><string>export</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>compileBitcode</key><string>NO</string>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath build/Dopamine.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath dist \
+            -allowProvisioningUpdates YES
+
+      - name: Rename IPA
+        run: mv dist/Dopamine.ipa dist/Dopamine-ios26.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dopamine-ios26-ipa
+          path: dist/Dopamine-ios26.ipa
